@@ -17,8 +17,11 @@ class H(BaseHTTPRequestHandler):
         try:
             tf = q["tf"][0]; assert tf in ("5m", "15m")
             if u.path == "/api/fetch":
-                r = subprocess.run([sys.executable, "-c", "import sys,json;from backtest import fetch_tradingview as f;print(json.dumps(f(sys.argv[1])))", tf],
-                                   cwd=HERE, capture_output=True, text=True, timeout=180)
+                src = q.get("source", ["tradingview"])[0]; days = str(int(q.get("days", ["90"])[0]))
+                fn = "fetch_dukascopy" if src == "dukascopy" else "fetch_tradingview"
+                args = [tf, days] if src == "dukascopy" else [tf]
+                r = subprocess.run([sys.executable, "-c", f"import sys,json;from backtest import {fn} as f;print(json.dumps(f(*sys.argv[1:])))", *args],
+                                   cwd=HERE, capture_output=True, text=True, timeout=1500)
                 if r.returncode: raise RuntimeError((r.stderr.strip().splitlines() or ["fetch failed"])[-1])
                 return self.send(200, r.stdout.strip().splitlines()[-1].encode(), "application/json")
             assert u.path == "/api/upload"
@@ -47,10 +50,18 @@ class H(BaseHTTPRequestHandler):
             self.send(404, b"not found", "text/plain")
 
 if __name__ == "__main__":
-    srv = ThreadingHTTPServer(("0.0.0.0", PORT), H)
+    share = bool(os.environ.get("NGROK_AUTHTOKEN"))
+    srv = ThreadingHTTPServer(("127.0.0.1" if share else "0.0.0.0", PORT), H)
     print(f"Local: http://localhost:{PORT}")
-    if os.environ.get("NGROK_AUTHTOKEN"):
+    if share:
+        import secrets, string
         from pyngrok import ngrok, conf
+        auth = os.path.join(HERE, ".auth")        # `user:password`, 8-128 chars (ngrok basic-auth rule)
+        if not os.path.exists(auth) or not open(auth).read().strip():
+            pw = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(20))
+            fd = os.open(auth, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600); os.write(fd, f"gold:{pw}\n".encode()); os.close(fd)
+        login = open(auth).read().strip()
         conf.get_default().auth_token = os.environ["NGROK_AUTHTOKEN"]
-        print("ngrok URL:", ngrok.connect(PORT).public_url, flush=True)
+        url = ngrok.connect(PORT, basic_auth=[login]).public_url
+        print(f"ngrok URL: {url}\nLogin:     {login.replace(':', '  /  password: ')}\n(saved in dashboard/.auth)", flush=True)
     srv.serve_forever()

@@ -84,6 +84,12 @@ def fetch_tradingview(tf: str, symbol="OANDA:XAUUSD", max_bars=20000, idle=10.0,
     csv = df.to_csv(index=False)
     return save_tv(tf, csv)
 
+def fetch_dukascopy(tf: str, days: int = 90) -> dict:
+    """Spot XAUUSD history from Dukascopy (bid), resampled from M1. Cents differ from OANDA quotes."""
+    from dukascopy import fetch_bars
+    df = fetch_bars(tf, int(days)).reset_index()
+    return save_tv(tf, df.to_csv(index=False))
+
 def data_info():
     r = {}
     for tf in ("5m", "15m"):

@@ -33,6 +33,7 @@ th,td{padding:4px 6px;text-align:right;border-bottom:1px solid var(--line)}th:fi
 <button onclick="run()">Run both</button><span id="st" style="color:var(--mut)"></span></div>
 <div class="ctrl" style="align-items:center"><b>TradingView data</b>
 <button onclick="pull()">Fetch OANDA:XAUUSD from TradingView</button>
+<label>Days<input id="days" type="number" value="180" step="30" style="width:70px"></label><button onclick="pull('dukascopy')" style="background:#475569">Fetch Dukascopy history</button>
 <label>5m CSV<input type="file" accept=".csv" style="width:200px" onchange="up('5m',this)"></label>
 <label>15m CSV<input type="file" accept=".csv" style="width:200px" onchange="up('15m',this)"></label>
 <span style="color:var(--mut);font-size:12px;flex:1;min-width:240px">Or export manually — in TradingView: open OANDA:XAUUSD, set 5m (then 15m), click the layout menu (top-right) → <i>Export chart data…</i>. Scroll back / zoom out first to load more history.</span></div>
@@ -59,9 +60,9 @@ function render(tf,s){
  const b=new Chart(document.getElementById('dy'+tf),{type:'bar',data:{labels:d.map(x=>x[0].slice(5)),datasets:[{data:d.map(x=>x[1]),backgroundColor:d.map(x=>x[1]>=0?'#34d399':'#f87171')}]},options:{...opt,animation:false}});
  charts[tf]=[e,b];
 }
-async function pull(){
- for(const tf of ['5m','15m']){st.textContent='fetching '+tf+' from TradingView…';
-  const r=await fetch('/api/fetch?tf='+tf,{method:'POST'});const j=await r.json();
+async function pull(src='tradingview'){
+ for(const tf of ['5m','15m']){st.textContent='fetching '+tf+' from '+src+(src=='dukascopy'?' (first run can take minutes)':'')+'…';
+  const r=await fetch('/api/fetch?tf='+tf+'&source='+src+'&days='+document.getElementById('days').value,{method:'POST'});const j=await r.json();
   if(j.error){st.textContent=tf+' fetch error: '+j.error;return}}
  run();
 }

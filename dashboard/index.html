@@ -22,7 +22,7 @@ th,td{padding:4px 6px;text-align:right;border-bottom:1px solid var(--line)}th:fi
 .scroll{max-height:240px;overflow:auto}.note{color:var(--mut);font-size:12px;margin-top:16px;line-height:1.5}
 </style></head><body>
 <h1>XAUUSD 20/50 EMA Pullback — Backtest Dashboard</h1>
-<div class="sub">Gold futures (GC=F) as spot proxy · last ~60 days (Yahoo intraday limit) · entry on close · SL/TP intrabar, SL first if both hit</div>
+<div class="sub">OANDA:XAUUSD data exported from TradingView (upload below) · entry on close · SL/TP intrabar, SL first if both hit</div>
 <div class="ctrl">
 <label>Stop (× ATR)<input id="atr" type="number" step="0.1" value="1.5"></label>
 <label>Reward : Risk<input id="rr" type="number" step="0.25" value="3"></label>
@@ -31,8 +31,12 @@ th,td{padding:4px 6px;text-align:right;border-bottom:1px solid var(--line)}th:fi
 <label>Capital $<input id="cap" type="number" step="1000" value="34000"></label>
 <label>First touch only<select id="first"><option value="1">Yes</option><option value="0">No</option></select></label>
 <button onclick="run()">Run both</button><span id="st" style="color:var(--mut)"></span></div>
+<div class="ctrl" style="align-items:center"><b>TradingView data</b>
+<label>5m CSV<input type="file" accept=".csv" style="width:200px" onchange="up('5m',this)"></label>
+<label>15m CSV<input type="file" accept=".csv" style="width:200px" onchange="up('15m',this)"></label>
+<span style="color:var(--mut);font-size:12px;flex:1;min-width:240px">In TradingView: open OANDA:XAUUSD, set 5m (then 15m), click the layout menu (top-right) → <i>Export chart data…</i>. Scroll back / zoom out first to load more history.</span></div>
 <div class="cols"><div class="panel" id="p5m"></div><div class="panel" id="p15m"></div></div>
-<div class="note">Education only, not financial advice. A 60-day sample is small — treat results as indicative, not proof. Futures prices differ slightly from OANDA spot; spread is modelled as a flat per-oz cost.</div>
+<div class="note">Education only, not financial advice. Results are only as good as the history you export — more bars means a more meaningful test. Spread is modelled as a flat per-oz cost.</div>
 <script>
 const charts={};const f=(x,d=2)=>x==null?'n/a':Number(x).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});
 const cls=x=>x>0?'up':x<0?'dn':'';
@@ -40,7 +44,7 @@ function tile(k,v,c=''){return `<div class="tile"><div class="k">${k}</div><div 
 function render(tf,s){
  const el=document.getElementById('p'+tf),m=s.summary;
  if(!m.n){el.innerHTML=`<h2>${tf}</h2>No trades.`;return}
- el.innerHTML=`<h2>${tf} chart <span style="color:var(--mut);font-weight:400;font-size:12px">${s.params.start.slice(0,10)} → ${s.params.end.slice(0,10)}</span></h2>
+ el.innerHTML=`<h2>${tf} chart <span style="color:var(--mut);font-weight:400;font-size:12px">${s.params.start.slice(0,10)} → ${s.params.end.slice(0,10)} · ${s.params.bars} bars</span></h2>
  <div class="tiles">${tile('Net profit','$'+f(m.net),cls(m.net))}${tile('Return',f(m.ret)+'%',cls(m.ret))}${tile('Max drawdown',f(m.max_dd)+'%','dn')}
  ${tile('Trades',m.n+' ('+m.longs+'L/'+m.shorts+'S)')}${tile('Win rate',f(m.win_rate,1)+'% <span style="font-size:11px;color:var(--mut)">BE '+m.be_win+'%</span>',m.win_rate>=m.be_win?'up':'dn')}${tile('Profit factor',f(m.pf),m.pf>=1?'up':'dn')}
  ${tile('Avg win','$'+f(m.avg_win),'up')}${tile('Avg loss','$'+f(m.avg_loss),'dn')}${tile('Expectancy',f(m.exp_r)+'R',cls(m.exp_r))}</div>
@@ -54,12 +58,17 @@ function render(tf,s){
  const b=new Chart(document.getElementById('dy'+tf),{type:'bar',data:{labels:d.map(x=>x[0].slice(5)),datasets:[{data:d.map(x=>x[1]),backgroundColor:d.map(x=>x[1]>=0?'#34d399':'#f87171')}]},options:{...opt,animation:false}});
  charts[tf]=[e,b];
 }
+async function up(tf,inp){
+ const f0=inp.files[0];if(!f0)return;st.textContent='uploading '+tf+'…';
+ const r=await fetch('/api/upload?tf='+tf,{method:'POST',body:await f0.text()});const j=await r.json();
+ st.textContent=j.error?('Upload error: '+j.error):`${tf}: ${j.bars} bars loaded`;if(!j.error)run();
+}
 async function run(){
  st.textContent='running…';
  const q=['atr','rr','risk','spread','cap','first'].map(k=>k+'='+document.getElementById(k).value).join('&');
  for(const tf of ['5m','15m']){
   const r=await fetch(`/api/backtest?tf=${tf}&${q}`);const s=await r.json();
-  if(s.error){document.getElementById('p'+tf).textContent=s.error;continue}render(tf,s)}
+  if(s.error){document.getElementById('p'+tf).innerHTML='<h2>'+tf+' chart</h2><div style="color:var(--mut)">'+s.error+'. Upload the TradingView export above.</div>';continue}render(tf,s)}
  st.textContent='updated '+new Date().toLocaleTimeString();
 }
 run();

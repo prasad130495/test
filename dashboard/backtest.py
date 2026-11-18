@@ -1,27 +1,49 @@
-"""20/50 EMA pullback backtester for gold (Yahoo GC=F as XAUUSD proxy)."""
+"""20/50 EMA pullback backtester on TradingView-exported OANDA:XAUUSD data."""
 import json, os, time, urllib.request
 import numpy as np, pandas as pd
 
 CACHE = os.path.join(os.path.dirname(__file__), "cache")
 os.makedirs(CACHE, exist_ok=True)
-SYMBOL = "GC=F"
 
-def fetch(tf: str, max_age=900) -> pd.DataFrame:
-    path = os.path.join(CACHE, f"{tf}.csv")
-    if os.path.exists(path) and time.time() - os.path.getmtime(path) < max_age:
-        return pd.read_csv(path, index_col=0, parse_dates=True)
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{SYMBOL}?interval={tf}&range=60d"
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    r = json.load(urllib.request.urlopen(req, timeout=30))["chart"]["result"][0]
-    q = r["indicators"]["quote"][0]
-    df = pd.DataFrame({k: q[k] for k in ("open", "high", "low", "close")},
-                      index=pd.to_datetime(r["timestamp"], unit="s", utc=True)).dropna()
-    df.to_csv(path)
-    return df
+def tv_path(tf): return os.path.join(CACHE, f"tv_{tf}.csv")
+
+def save_tv(tf: str, text: str) -> dict:
+    """Parse a TradingView 'Export chart data' CSV and store it normalised."""
+    import io
+    df = pd.read_csv(io.StringIO(text))
+    df.columns = [c.strip().lower() for c in df.columns]
+    if "time" not in df.columns or not {"open", "high", "low", "close"} <= set(df.columns):
+        raise ValueError("CSV needs time, open, high, low, close columns (TradingView export format)")
+    t = df["time"]
+    if pd.api.types.is_numeric_dtype(t):
+        idx = pd.to_datetime(t, unit="s", utc=True)
+    else:
+        idx = pd.to_datetime(t, utc=True)
+    out = pd.DataFrame({k: df[k].astype(float) for k in ("open", "high", "low", "close")}, index=idx)
+    out = out[~out.index.duplicated()].sort_index().dropna()
+    if len(out) < 120:
+        raise ValueError(f"only {len(out)} bars - need at least 120")
+    out.index.name = "time"
+    out.to_csv(tv_path(tf))
+    return dict(bars=len(out), start=out.index[0].isoformat(), end=out.index[-1].isoformat())
+
+def load_tv(tf: str) -> pd.DataFrame:
+    if not os.path.exists(tv_path(tf)):
+        raise FileNotFoundError(f"No TradingView data uploaded for {tf} yet")
+    return pd.read_csv(tv_path(tf), index_col=0, parse_dates=True)
+
+def data_info():
+    r = {}
+    for tf in ("5m", "15m"):
+        try:
+            d = load_tv(tf); r[tf] = dict(bars=len(d), start=d.index[0].isoformat(), end=d.index[-1].isoformat())
+        except FileNotFoundError:
+            r[tf] = None
+    return r
 
 def backtest(tf="15m", fast=20, slow=50, atr_len=14, atr_mult=1.5, rr=3.0,
              risk_pct=1.0, capital=34000.0, spread=0.35, first_touch=True):
-    df = fetch(tf).copy()
+    df = load_tv(tf).copy()
     c, h, l = df.close, df.high, df.low
     df["ef"] = c.ewm(span=fast, adjust=False).mean()
     df["es"] = c.ewm(span=slow, adjust=False).mean()
@@ -87,6 +109,3 @@ def stats(tf, trades, curve, cap, params):
         final=round(eq.iloc[-1], 2), trading_days=int(t.month.nunique()))
     return s
 
-if __name__ == "__main__":
-    for tf in ("5m", "15m"):
-        s = backtest(tf); print(tf, json.dumps(s["summary"]))

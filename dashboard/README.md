@@ -1,5 +1,6 @@
-# Gold 20/50 EMA backtest dashboard
+# Gold 20/50 EMA backtest dashboard (TradingView OANDA:XAUUSD data)
     pip install -r requirements.txt
-    export NGROK_AUTHTOKEN=<your token from dashboard.ngrok.com>
-    python3 server.py        # prints a public ngrok URL (omit the token for localhost only)
-Data: Yahoo GC=F 5m/15m, last ~60 days. Rerun controls on the page recompute both timeframes.
+    export NGROK_AUTHTOKEN=<token>   # optional: prints a public ngrok URL
+    python3 server.py
+Click "Fetch OANDA:XAUUSD from TradingView" (websocket, like the xauusd-ai project) or upload a TradingView
+"Export chart data" CSV per timeframe. Free accounts return ~1 month of 5m / ~3 months of 15m; set TV_JWT for more.

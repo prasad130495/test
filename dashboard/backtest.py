@@ -1,5 +1,5 @@
 """20/50 EMA pullback backtester on TradingView-exported OANDA:XAUUSD data."""
-import json, os, time, urllib.request
+import json, os, time
 import numpy as np, pandas as pd
 
 CACHE = os.path.join(os.path.dirname(__file__), "cache")
@@ -31,6 +31,58 @@ def load_tv(tf: str) -> pd.DataFrame:
     if not os.path.exists(tv_path(tf)):
         raise FileNotFoundError(f"No TradingView data uploaded for {tf} yet")
     return pd.read_csv(tv_path(tf), index_col=0, parse_dates=True)
+
+# ---- Live fetch from TradingView (same websocket approach as the xauusd-ai project) ----
+import re, logging
+_RES = {"5m": "5", "15m": "15"}
+_MINS = {"5m": 5, "15m": 15}
+_HB = re.compile(r"~m~\d+~m~~h~\d+")
+_SPLIT = re.compile(r"~m~\d+~m~")
+
+def fetch_tradingview(tf: str, symbol="OANDA:XAUUSD", max_bars=20000, idle=10.0, max_wait=90.0) -> dict:
+    """Download bars for `symbol` from TradingView and store them. Free accounts get ~1 month of 5m;
+    set TV_JWT to a TradingView websocket token for deeper paid-plan history."""
+    from tradingview_scraper.symbols.stream import Streamer
+    from websocket import WebSocketTimeoutException
+    lvl = logging.getLogger().level
+    h = Streamer(websocket_jwt_token=os.environ.get("TV_JWT", "unauthorized_user_token")).stream_obj
+    logging.getLogger().setLevel(lvl)
+    ws = h.ws
+    sym = json.dumps({"adjustment": "splits", "symbol": symbol})
+    h.send_message("quote_add_symbols", [h.quote_session, "=" + sym])
+    h.send_message("resolve_symbol", [h.chart_session, "sds_sym_1", "=" + sym])
+    h.send_message("create_series", [h.chart_session, "sds_1", "s1", "sds_sym_1", _RES[tf], max_bars, ""])
+    bars, done = {}, False
+    ws.settimeout(2)
+    deadline, hard = time.time() + idle, time.time() + max_wait
+    try:
+        while not done and len(bars) < max_bars and time.time() < min(deadline, hard):
+            try:
+                msg = ws.recv()
+            except WebSocketTimeoutException:
+                continue
+            if _HB.fullmatch(msg):
+                ws.send(msg); continue
+            for item in filter(None, _SPLIT.split(msg)):
+                try: pkt = json.loads(item)
+                except json.JSONDecodeError: continue
+                if pkt.get("m") in ("symbol_error", "critical_error", "protocol_error"):
+                    raise RuntimeError(f"TradingView error: {pkt}")
+                if pkt.get("m") == "series_completed": done = True
+                if pkt.get("m") in ("timescale_update", "du"):
+                    for e in pkt["p"][1].get("sds_1", {}).get("s", []):
+                        v = e.get("v", [])
+                        if len(v) >= 5:
+                            bars[v[0]] = v[:5]; deadline = time.time() + idle
+    finally:
+        ws.close()
+    if not bars:
+        raise RuntimeError(f"no data from TradingView for {symbol} {tf}")
+    df = pd.DataFrame(sorted(bars.values()), columns=["time", "open", "high", "low", "close"])
+    df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+    df = df[df["time"] + pd.Timedelta(minutes=_MINS[tf]) <= pd.Timestamp.now(tz="UTC")]  # closed bars only
+    csv = df.to_csv(index=False)
+    return save_tv(tf, csv)
 
 def data_info():
     r = {}

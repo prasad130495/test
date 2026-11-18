@@ -1,8 +1,8 @@
 """Serve the dashboard; optionally expose via ngrok (set NGROK_AUTHTOKEN)."""
-import json, os, sys
+import json, os, sys, subprocess
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
-from backtest import backtest, save_tv, data_info
+from backtest import backtest, save_tv, data_info, fetch_tradingview
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PORT = int(os.environ.get("PORT", 8050))
@@ -15,7 +15,13 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         u = urlparse(self.path); q = parse_qs(u.query)
         try:
-            tf = q["tf"][0]; assert u.path == "/api/upload" and tf in ("5m", "15m")
+            tf = q["tf"][0]; assert tf in ("5m", "15m")
+            if u.path == "/api/fetch":
+                r = subprocess.run([sys.executable, "-c", "import sys,json;from backtest import fetch_tradingview as f;print(json.dumps(f(sys.argv[1])))", tf],
+                                   cwd=HERE, capture_output=True, text=True, timeout=180)
+                if r.returncode: raise RuntimeError((r.stderr.strip().splitlines() or ["fetch failed"])[-1])
+                return self.send(200, r.stdout.strip().splitlines()[-1].encode(), "application/json")
+            assert u.path == "/api/upload"
             body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode("utf-8-sig")
             self.send(200, json.dumps(save_tv(tf, body)).encode(), "application/json")
         except Exception as e:

@@ -22,7 +22,7 @@ th,td{padding:4px 6px;text-align:right;border-bottom:1px solid var(--line)}th:fi
 .scroll{max-height:240px;overflow:auto}.note{color:var(--mut);font-size:12px;margin-top:16px;line-height:1.5}
 </style></head><body>
 <h1>XAUUSD 20/50 EMA Pullback — Backtest Dashboard</h1>
-<div class="sub">OANDA:XAUUSD data exported from TradingView (upload below) · entry on close · SL/TP intrabar, SL first if both hit</div>
+<div class="sub">OANDA:XAUUSD data from TradingView (fetch or upload below) · entry on close · SL/TP intrabar, SL first if both hit</div>
 <div class="ctrl">
 <label>Stop (× ATR)<input id="atr" type="number" step="0.1" value="1.5"></label>
 <label>Reward : Risk<input id="rr" type="number" step="0.25" value="3"></label>
@@ -32,9 +32,10 @@ th,td{padding:4px 6px;text-align:right;border-bottom:1px solid var(--line)}th:fi
 <label>First touch only<select id="first"><option value="1">Yes</option><option value="0">No</option></select></label>
 <button onclick="run()">Run both</button><span id="st" style="color:var(--mut)"></span></div>
 <div class="ctrl" style="align-items:center"><b>TradingView data</b>
+<button onclick="pull()">Fetch OANDA:XAUUSD from TradingView</button>
 <label>5m CSV<input type="file" accept=".csv" style="width:200px" onchange="up('5m',this)"></label>
 <label>15m CSV<input type="file" accept=".csv" style="width:200px" onchange="up('15m',this)"></label>
-<span style="color:var(--mut);font-size:12px;flex:1;min-width:240px">In TradingView: open OANDA:XAUUSD, set 5m (then 15m), click the layout menu (top-right) → <i>Export chart data…</i>. Scroll back / zoom out first to load more history.</span></div>
+<span style="color:var(--mut);font-size:12px;flex:1;min-width:240px">Or export manually — in TradingView: open OANDA:XAUUSD, set 5m (then 15m), click the layout menu (top-right) → <i>Export chart data…</i>. Scroll back / zoom out first to load more history.</span></div>
 <div class="cols"><div class="panel" id="p5m"></div><div class="panel" id="p15m"></div></div>
 <div class="note">Education only, not financial advice. Results are only as good as the history you export — more bars means a more meaningful test. Spread is modelled as a flat per-oz cost.</div>
 <script>
@@ -57,6 +58,12 @@ function render(tf,s){
  const d=Object.entries(s.daily);
  const b=new Chart(document.getElementById('dy'+tf),{type:'bar',data:{labels:d.map(x=>x[0].slice(5)),datasets:[{data:d.map(x=>x[1]),backgroundColor:d.map(x=>x[1]>=0?'#34d399':'#f87171')}]},options:{...opt,animation:false}});
  charts[tf]=[e,b];
+}
+async function pull(){
+ for(const tf of ['5m','15m']){st.textContent='fetching '+tf+' from TradingView…';
+  const r=await fetch('/api/fetch?tf='+tf,{method:'POST'});const j=await r.json();
+  if(j.error){st.textContent=tf+' fetch error: '+j.error;return}}
+ run();
 }
 async function up(tf,inp){
  const f0=inp.files[0];if(!f0)return;st.textContent='uploading '+tf+'…';

@@ -19,7 +19,7 @@ def save_tv(tf: str, text: str) -> dict:
         idx = pd.to_datetime(t, unit="s", utc=True)
     else:
         idx = pd.to_datetime(t, utc=True)
-    out = pd.DataFrame({k: df[k].astype(float) for k in ("open", "high", "low", "close")}, index=idx)
+    out = pd.DataFrame({k: df[k].astype(float).to_numpy() for k in ("open", "high", "low", "close")}, index=pd.DatetimeIndex(idx))
     out = out[~out.index.duplicated()].sort_index().dropna()
     if len(out) < 120:
         raise ValueError(f"only {len(out)} bars - need at least 120")

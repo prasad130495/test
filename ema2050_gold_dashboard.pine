@@ -1,0 +1,152 @@
+//@version=6
+strategy("Gold 20/50 EMA Pullback + Dashboard", shorttitle="G2050",
+     overlay=true, initial_capital=34000, currency=currency.USD,
+     process_orders_on_close=true, calc_on_every_tick=false,
+     commission_type=strategy.commission.cash_per_contract, commission_value=0.0,
+     max_bars_back=500, pyramiding=0)
+
+// =============================================================
+// Strategy (from the post):
+// 1) EMA20 vs EMA50 sets the side (20 above 50 = longs only, below = shorts only)
+// 2) Price must TOUCH the 20 EMA. No touch, no trade.
+// 3) Enter on the bar CLOSE; stop + target placed together.
+// 4) Fixed risk % per trade, same size logic every time. One trade per cross (optional).
+// Apply on the 5m chart, then again on the 15m chart. Settings below auto-switch per timeframe.
+// =============================================================
+
+// ---------- Inputs ----------
+grpS = "Signal"
+fastLen   = input.int(20, "Fast EMA", minval=1, group=grpS)
+slowLen   = input.int(50, "Slow EMA", minval=1, group=grpS)
+oneTrade  = input.bool(true, "Only first touch after each cross", group=grpS)
+needClose = input.bool(true, "Close must finish back on trend side of EMA20", group=grpS)
+
+grpR = "Risk (separate values per timeframe)"
+riskPct   = input.float(1.0, "Risk % per trade", step=0.25, minval=0.05, group=grpR)
+atrLen    = input.int(14, "ATR length", group=grpR)
+atrMult5  = input.float(1.5, "5m  stop = ATR x", step=0.1, group=grpR)
+rr5       = input.float(3.0, "5m  reward : risk", step=0.25, group=grpR)
+atrMult15 = input.float(1.5, "15m stop = ATR x", step=0.1, group=grpR)
+rr15      = input.float(3.0, "15m reward : risk", step=0.25, group=grpR)
+ozPerUnit = input.float(1.0, "Units per oz (OANDA XAUUSD qty = oz)", step=0.1, group=grpR)
+
+grpD = "Dashboard"
+showDash  = input.bool(true, "Show dashboard", group=grpD)
+dashPos   = input.string("Top right", "Position", options=["Top right","Top left","Bottom right","Bottom left"], group=grpD)
+
+// ---------- Timeframe-specific params ----------
+is5  = timeframe.in_seconds() <= 300
+atrMult = is5 ? atrMult5 : atrMult15
+rr      = is5 ? rr5 : rr15
+tfName  = is5 ? "5m" : (timeframe.in_seconds() == 900 ? "15m" : timeframe.period)
+
+// ---------- Indicators ----------
+emaF = ta.ema(close, fastLen)
+emaS = ta.ema(close, slowLen)
+atr  = ta.atr(atrLen)
+
+plot(emaF, "EMA 20", color=color.new(color.orange, 0), linewidth=2)
+plot(emaS, "EMA 50", color=color.new(color.blue, 0), linewidth=2)
+
+bullTrend = emaF > emaS
+bearTrend = emaF < emaS
+crossed   = ta.cross(emaF, emaS)
+
+var bool tradedThisCross = false
+if crossed
+    tradedThisCross := false
+
+// touch of the 20
+touchLong  = low  <= emaF and (not needClose or close > emaF)
+touchShort = high >= emaF and (not needClose or close < emaF)
+
+canTrade = not oneTrade or not tradedThisCross
+longSig  = bullTrend and touchLong  and canTrade and strategy.position_size == 0
+shortSig = bearTrend and touchShort and canTrade and strategy.position_size == 0
+
+// ---------- Sizing: fixed % risk ----------
+stopDist = atr * atrMult
+riskCash = strategy.equity * riskPct / 100
+qty      = stopDist > 0 ? riskCash / stopDist / ozPerUnit : 0.0
+
+// ---------- Orders ----------
+var float eLong = na
+var float eShort = na
+if longSig and qty > 0
+    strategy.entry("L", strategy.long, qty=qty)
+    eLong := close
+    tradedThisCross := true
+    strategy.exit("L x", "L", stop=close - stopDist, limit=close + stopDist * rr)
+if shortSig and qty > 0
+    strategy.entry("S", strategy.short, qty=qty)
+    eShort := close
+    tradedThisCross := true
+    strategy.exit("S x", "S", stop=close + stopDist, limit=close - stopDist * rr)
+
+plotshape(longSig,  "Long",  shape.triangleup,   location.belowbar, color.new(color.lime, 0), size=size.tiny)
+plotshape(shortSig, "Short", shape.triangledown, location.abovebar, color.new(color.red, 0),  size=size.tiny)
+
+// ---------- Dashboard ----------
+pos = switch dashPos
+    "Top right"    => position.top_right
+    "Top left"     => position.top_left
+    "Bottom right" => position.bottom_right
+    => position.bottom_left
+
+var table t = table.new(pos, 2, 18, border_width=1,
+     frame_color=color.new(color.gray, 60), frame_width=1,
+     border_color=color.new(color.gray, 80))
+
+cell(r, k, v, vc = color.white) =>
+    table.cell(t, 0, r, k, text_color=color.new(color.white, 20), bgcolor=color.new(#0b1020, 5), text_halign=text.align_left, text_size=size.small)
+    table.cell(t, 1, r, v, text_color=vc, bgcolor=color.new(#0b1020, 5), text_halign=text.align_right, text_size=size.small)
+
+pnlColor(x) => x > 0 ? color.lime : x < 0 ? color.red : color.white
+
+if showDash and barstate.islast
+    closed   = strategy.closedtrades
+    wins     = strategy.wintrades
+    losses   = strategy.losstrades
+    net      = strategy.netprofit
+    gp       = strategy.grossprofit
+    gl        = strategy.grossloss
+    ret      = net / strategy.initial_capital * 100
+    winRate  = closed > 0 ? wins / closed * 100 : 0.0
+    pf       = gl != 0 ? gp / math.abs(gl) : na
+    avgWin   = wins > 0 ? gp / wins : 0.0
+    avgLoss  = losses > 0 ? gl / losses : 0.0
+    expect   = closed > 0 ? net / closed : 0.0
+    // expectancy in R: each trade risks ~riskPct of equity
+    expR     = closed > 0 ? (winRate / 100 * rr - (1 - winRate / 100)) : 0.0
+    ddPct    = strategy.max_drawdown / strategy.initial_capital * 100
+    // longs / shorts count
+    var int nL = 0
+    var int nS = 0
+    nL := 0
+    nS := 0
+    for i = 0 to closed - 1
+        if strategy.closedtrades.direction(i) == strategy.direction.long
+            nL += 1
+        else
+            nS += 1
+
+    table.merge_cells(t, 0, 0, 1, 0)
+    table.cell(t, 0, 0, "XAUUSD " + tfName + "  |  20/50 EMA  |  SL " + str.tostring(atrMult, "#.0") + "xATR  TP " + str.tostring(rr, "#.0") + "R",
+         text_color=color.white, bgcolor=color.new(#1d4ed8, 0), text_size=size.small)
+    cell(1,  "Net profit",       "$" + str.tostring(net, "#,###.00"), pnlColor(net))
+    cell(2,  "Return",           str.tostring(ret, "#.00") + "%", pnlColor(ret))
+    cell(3,  "Max drawdown",     str.tostring(ddPct, "#.00") + "%", color.orange)
+    cell(4,  "Total trades",     str.tostring(closed))
+    cell(5,  "Long / Short",     str.tostring(nL) + " / " + str.tostring(nS))
+    cell(6,  "Win rate",         str.tostring(winRate, "#.0") + "%", winRate >= 100 / (1 + rr) ? color.lime : color.red)
+    cell(7,  "Break-even win %", str.tostring(100 / (1 + rr), "#.0") + "%")
+    cell(8,  "Profit factor",    na(pf) ? "n/a" : str.tostring(pf, "#.00"), (na(pf) ? 0 : pf) >= 1 ? color.lime : color.red)
+    cell(9,  "Avg win",          "$" + str.tostring(avgWin, "#,###.00"), color.lime)
+    cell(10, "Avg loss",         "$" + str.tostring(avgLoss, "#,###.00"), color.red)
+    cell(11, "Expectancy / trade", "$" + str.tostring(expect, "#,###.00"), pnlColor(expect))
+    cell(12, "Expectancy (R)",   str.tostring(expR, "#.00") + "R", pnlColor(expR))
+    cell(13, "Gross profit",     "$" + str.tostring(gp, "#,###.00"), color.lime)
+    cell(14, "Gross loss",       "$" + str.tostring(gl, "#,###.00"), color.red)
+    cell(15, "Equity",           "$" + str.tostring(strategy.equity, "#,###.00"))
+    cell(16, "Risk / trade",     str.tostring(riskPct, "#.00") + "%  ($" + str.tostring(riskCash, "#,###") + ")")
+    cell(17, "Open P&L",         "$" + str.tostring(strategy.openprofit, "#,###.00"), pnlColor(strategy.openprofit))
